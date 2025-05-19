@@ -39,6 +39,7 @@ main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
 main_frame.grid_columnconfigure(0, weight=1)
 
 # Add logo/title to sidebar with accent color
+# Here is the line that is for display my name in dashboard properly
 logo_label = ctk.CTkLabel(sidebar_frame, text="Prithika", 
                          font=ctk.CTkFont(family="Helvetica", size=26, weight="bold"),
                          text_color=("#1F538D", "#3B8ED0"))
