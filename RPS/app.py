@@ -2,6 +2,8 @@ import customtkinter as ctk
 from datetime import datetime
 from data_utils import create_charts
 from game_utils import RPSGame
+from user_utils import UserManager
+import pandas as pd
 
 # Set appearance mode and default color theme
 ctk.set_appearance_mode("dark")
@@ -21,12 +23,12 @@ x = (screen_width - 1000) // 2
 y = (screen_height - 600) // 2
 app.geometry(f"1000x600+{x}+{y}")
 
+# Initialize user manager
+user_manager = UserManager()
+
 # Configure grid layout
 app.grid_rowconfigure(0, weight=1)
 app.grid_columnconfigure(1, weight=1)
-
-# Create frames dictionary to store different views
-frames = {}
 
 # Create sidebar frame with gradient effect
 sidebar_frame = ctk.CTkFrame(app, width=200, corner_radius=0, fg_color=("#2B2B2B", "#2B2B2B"))
@@ -55,28 +57,75 @@ button_style = {
     "font": ctk.CTkFont(family="Roboto", size=14)
 }
 
-nav_buttons = [
-    ("🏠 Dashboard", "dashboard"),
-    ("🎮 Game", "game"),
-    ("📋 History", "history")
-]
-
 # Create frames dictionary to store different views
 frames = {}
 
 def show_frame(frame_name):
+    # Check authentication for protected frames
+    protected_frames = ['dashboard', 'game', 'history']
+    
+    if frame_name in protected_frames and not user_manager.is_authenticated():
+        frame_name = 'login'
+    
     for frame in frames.values():
         frame.grid_remove()
-    if frame_name == 'dashboard':
+    
+    if frame_name == 'dashboard' and user_manager.is_authenticated():
         update_stats_display()
-    elif frame_name == 'history':
+    elif frame_name == 'history' and user_manager.is_authenticated():
         update_history_display()
+        
     frames[frame_name].grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+    
+    # Update navigation buttons based on authentication state
+    update_navigation()
 
-# Create and configure navigation buttons
-for i, (text, frame_name) in enumerate(nav_buttons, 1):
-    btn = ctk.CTkButton(sidebar_frame, text=text, command=lambda n=frame_name: show_frame(n), **button_style)
-    btn.grid(row=i, column=0, padx=20, pady=10, sticky="ew")
+def update_navigation():
+    # Clear existing buttons
+    for widget in sidebar_frame.winfo_children():
+        if isinstance(widget, ctk.CTkButton):
+            widget.destroy()
+    
+    # Define navigation items based on authentication
+    if user_manager.is_authenticated():
+        nav_buttons = [
+            ("🏠 Dashboard", "dashboard"),
+            ("🎮 Game", "game"),
+            ("📋 History", "history"),
+            ("🚪 Logout", "logout")
+        ]
+        
+        # Update welcome message
+        username = user_manager.get_current_user()
+        logo_label.configure(text=f"Hi, {username}")
+    else:
+        nav_buttons = [
+            ("🔑 Login", "login"),
+            ("📝 Register", "register")
+        ]
+        logo_label.configure(text="Welcome")
+
+    # Create navigation buttons
+    for i, (text, frame_name) in enumerate(nav_buttons, 1):
+        if frame_name == "logout":
+            btn = ctk.CTkButton(
+                sidebar_frame, 
+                text=text, 
+                command=handle_logout,
+                **button_style
+            )
+        else:
+            btn = ctk.CTkButton(
+                sidebar_frame, 
+                text=text, 
+                command=lambda n=frame_name: show_frame(n),
+                **button_style
+            )
+        btn.grid(row=i, column=0, padx=20, pady=10, sticky="ew")
+
+def handle_logout():
+    user_manager.logout()
+    show_frame('login')
 
 # Create main dashboard frame
 dashboard_frame = ctk.CTkFrame(app, fg_color="transparent")
@@ -84,7 +133,7 @@ frames['dashboard'] = dashboard_frame
 dashboard_frame.grid_columnconfigure(0, weight=1)
 
 # Create other frames
-for frame_name in ['game', 'history', 'settings']:
+for frame_name in ['game', 'history']:
     frame = ctk.CTkFrame(app, fg_color="transparent")
     frames[frame_name] = frame
     frame.grid_columnconfigure(0, weight=1)
@@ -93,6 +142,144 @@ for frame_name in ['game', 'history', 'settings']:
     title = ctk.CTkLabel(frame, text=frame_name.title(),
                         font=ctk.CTkFont(family="Helvetica", size=32, weight="bold"))
     title.grid(row=0, column=0, padx=20, pady=(20,30), sticky="w")
+
+# Create login frame
+login_frame = ctk.CTkFrame(app, fg_color="transparent")
+frames['login'] = login_frame
+login_frame.grid_columnconfigure(0, weight=1)
+
+# Create login form
+login_container = ctk.CTkFrame(login_frame, fg_color=("#E3E3E3", "#2B2B2B"), corner_radius=15)
+login_container.grid(row=0, column=0, padx=100, pady=100)
+
+login_title = ctk.CTkLabel(login_container, 
+                          text="Login",
+                          font=ctk.CTkFont(family="Helvetica", size=32, weight="bold"))
+login_title.grid(row=0, column=0, columnspan=2, padx=40, pady=(30, 20))
+
+username_label = ctk.CTkLabel(login_container, text="Username:")
+username_label.grid(row=1, column=0, padx=20, pady=10, sticky="e")
+username_entry = ctk.CTkEntry(login_container, width=200)
+username_entry.grid(row=1, column=1, padx=20, pady=10, sticky="w")
+
+password_label = ctk.CTkLabel(login_container, text="Password:")
+password_label.grid(row=2, column=0, padx=20, pady=10, sticky="e")
+password_entry = ctk.CTkEntry(login_container, width=200, show="*")
+password_entry.grid(row=2, column=1, padx=20, pady=10, sticky="w")
+
+login_message = ctk.CTkLabel(login_container, text="", text_color="red")
+login_message.grid(row=3, column=0, columnspan=2, padx=20, pady=5)
+
+def handle_login():
+    username = username_entry.get()
+    password = password_entry.get()
+    
+    # Basic validation
+    if not username or not password:
+        login_message.configure(text="Please fill all fields")
+        return
+        
+    success, message = user_manager.authenticate(username, password)
+    if success:
+        # Set the current user in the game
+        game.set_user(username)
+        login_message.configure(text="")
+        show_frame('dashboard')
+    else:
+        login_message.configure(text=message)
+
+login_button = ctk.CTkButton(login_container, 
+                            text="Login", 
+                            command=handle_login,
+                            fg_color=("#1F538D", "#3B8ED0"),
+                            hover_color=("#163d67", "#2a6faa"))
+login_button.grid(row=4, column=0, columnspan=2, padx=20, pady=20)
+
+register_link = ctk.CTkButton(login_container, 
+                             text="Don't have an account? Register", 
+                             command=lambda: show_frame('register'),
+                             fg_color="transparent",
+                             hover_color=("gray80", "gray30"))
+register_link.grid(row=5, column=0, columnspan=2, padx=20, pady=(0, 30))
+
+# Create register frame
+register_frame = ctk.CTkFrame(app, fg_color="transparent")
+frames['register'] = register_frame
+register_frame.grid_columnconfigure(0, weight=1)
+
+# Create registration form
+register_container = ctk.CTkFrame(register_frame, fg_color=("#E3E3E3", "#2B2B2B"), corner_radius=15)
+register_container.grid(row=0, column=0, padx=100, pady=80)
+
+register_title = ctk.CTkLabel(register_container, 
+                             text="Register New Account",
+                             font=ctk.CTkFont(family="Helvetica", size=28, weight="bold"))
+register_title.grid(row=0, column=0, columnspan=2, padx=40, pady=(30, 20))
+
+reg_username_label = ctk.CTkLabel(register_container, text="Username:")
+reg_username_label.grid(row=1, column=0, padx=20, pady=10, sticky="e")
+reg_username_entry = ctk.CTkEntry(register_container, width=200)
+reg_username_entry.grid(row=1, column=1, padx=20, pady=10, sticky="w")
+
+reg_email_label = ctk.CTkLabel(register_container, text="Email:")
+reg_email_label.grid(row=2, column=0, padx=20, pady=10, sticky="e")
+reg_email_entry = ctk.CTkEntry(register_container, width=200)
+reg_email_entry.grid(row=2, column=1, padx=20, pady=10, sticky="w")
+
+reg_password_label = ctk.CTkLabel(register_container, text="Password:")
+reg_password_label.grid(row=3, column=0, padx=20, pady=10, sticky="e")
+reg_password_entry = ctk.CTkEntry(register_container, width=200, show="*")
+reg_password_entry.grid(row=3, column=1, padx=20, pady=10, sticky="w")
+
+reg_confirm_label = ctk.CTkLabel(register_container, text="Confirm Password:")
+reg_confirm_label.grid(row=4, column=0, padx=20, pady=10, sticky="e")
+reg_confirm_entry = ctk.CTkEntry(register_container, width=200, show="*")
+reg_confirm_entry.grid(row=4, column=1, padx=20, pady=10, sticky="w")
+
+register_message = ctk.CTkLabel(register_container, text="", text_color="red")
+register_message.grid(row=5, column=0, columnspan=2, padx=20, pady=5)
+
+def handle_registration():
+    username = reg_username_entry.get()
+    email = reg_email_entry.get()
+    password = reg_password_entry.get()
+    confirm = reg_confirm_entry.get()
+    
+    # Validation
+    if not username or not email or not password or not confirm:
+        register_message.configure(text="Please fill all fields")
+        return
+        
+    if password != confirm:
+        register_message.configure(text="Passwords don't match")
+        return
+    
+    success, message = user_manager.register_user(username, password, email)
+    if success:
+        register_message.configure(text="Registration successful!", text_color="green")
+        # Clear fields
+        reg_username_entry.delete(0, 'end')
+        reg_email_entry.delete(0, 'end')
+        reg_password_entry.delete(0, 'end')
+        reg_confirm_entry.delete(0, 'end')
+        # Redirect to login after 2 seconds
+        app.after(2000, lambda: show_frame('login'))
+    else:
+        register_message.configure(text=message)
+
+register_button = ctk.CTkButton(register_container, 
+                               text="Register", 
+                               command=handle_registration,
+                               fg_color=("#1F538D", "#3B8ED0"),
+                               hover_color=("#163d67", "#2a6faa"))
+register_button.grid(row=6, column=0, columnspan=2, padx=20, pady=20)
+
+login_link = ctk.CTkButton(register_container, 
+                          text="Already have an account? Login", 
+                          command=lambda: show_frame('login'),
+                          fg_color="transparent",
+                          hover_color=("gray80", "gray30"))
+login_link.grid(row=7, column=0, columnspan=2, padx=20, pady=(0, 30))
 
 # Dashboard content
 # Header with date
@@ -111,7 +298,7 @@ welcome_frame.grid(row=1, column=0, sticky="ew", pady=(0, 20))
 welcome_frame.grid_columnconfigure(0, weight=1)
 
 welcome_label = ctk.CTkLabel(welcome_frame, 
-                            text="👋 Welcome back, Prithika!",
+                            text="👋 Welcome back, {username}!",
                             font=ctk.CTkFont(family="Helvetica", size=32, weight="bold"))
 welcome_label.grid(row=0, column=0, padx=20, pady=(20,10), sticky="w")
 
@@ -153,6 +340,11 @@ charts_widget.pack(fill="both", expand=True)
 
 # Modify dashboard to show game stats
 def update_stats_display():
+    # Update welcome message with current username
+    if user_manager.is_authenticated():
+        username = user_manager.get_current_user()
+        welcome_label.configure(text=f"👋 Welcome back, {username}!")
+    
     stats = game.get_stats()
     stats_data = [
         ("Total Games", str(stats['total_games']), "🎮"),
@@ -319,15 +511,16 @@ def create_game_interface():
 # Initialize game interface
 create_game_interface()
 
-# Show dashboard initially
-show_frame('dashboard')
-
 # Add appearance mode switcher at bottom of sidebar
 appearance_mode_menu = ctk.CTkOptionMenu(sidebar_frame, 
-                                       values=["Dark", "Light", "System"],
-                                       command=lambda x: ctk.set_appearance_mode(x.lower()),
-                                       font=ctk.CTkFont(family="Arial", size=13))
-appearance_mode_menu.grid(row=5, column=0, padx=20, pady=20, sticky="s")
+                                      values=["Dark", "Light", "System"],
+                                      command=lambda x: ctk.set_appearance_mode(x.lower()),
+                                      font=ctk.CTkFont(family="Arial", size=13))
+appearance_mode_menu.grid(row=10, column=0, padx=20, pady=20, sticky="s")
+
+# Update navigation and show login initially
+update_navigation()
+show_frame('login')
 
 # Run the application
 app.mainloop()
